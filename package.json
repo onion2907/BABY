@@ -1,0 +1,14 @@
+{
+  "name": "camera-watch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Watch your laptop camera with a local vision model and get a running summary beside the live feed.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

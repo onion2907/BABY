@@ -79,6 +79,50 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
 button.primary[data-running="true"] { background: var(--bad); color: #1a0d0c; }
 
+button.ghost {
+  background: transparent;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 13px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+button.ghost:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-faint); }
+button.ghost:disabled { opacity: 0.35; cursor: not-allowed; }
+button.ghost.small { padding: 4px 9px; font-size: 12px; margin-left: auto; }
+button.ghost.small + .meta { margin-left: 10px; }
+
+/* A banner for the things that actually stop you: no model installed, Ollama
+   not running, a model too big for the machine. */
+.banner {
+  margin: 14px 20px 0;
+  padding: 12px 15px;
+  border: 1px solid rgb(232 180 74 / 0.4);
+  background: rgb(232 180 74 / 0.09);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.banner[data-tone="bad"] {
+  border-color: rgb(240 115 106 / 0.4);
+  background: rgb(240 115 106 / 0.09);
+  color: var(--bad);
+}
+.banner code {
+  display: inline-block;
+  background: rgb(0 0 0 / 0.35);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-top: 4px;
+  font: 500 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+  user-select: all;
+}
+
 /* ---------- layout ---------- */
 
 main {
@@ -172,7 +216,8 @@ video {
   min-width: 62px;
   text-align: right;
 }
-.controls small {
+.controls small,
+label > small {
   color: var(--ink-faint);
   font-size: 11px;
   font-weight: 400;

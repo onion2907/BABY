@@ -13,8 +13,11 @@
   <div class="status" id="status" data-state="idle">
     <span class="dot"></span><span id="status-text">Checking Ollama…</span>
   </div>
+  <button id="look-once" class="ghost" disabled>Look once</button>
   <button id="toggle" class="primary" disabled>Start watching</button>
 </header>
+
+<div class="banner" id="banner" hidden><span id="banner-text"></span></div>
 
 <main>
   <section class="feed panel">
@@ -29,7 +32,7 @@
 
     <div class="controls">
       <label>
-        Vision model
+        Vision model <small id="vision-note"></small>
         <select id="vision-model"></select>
       </label>
       <label>
@@ -37,38 +40,41 @@
         <select id="summary-model"></select>
       </label>
       <label>
-        Look every
+        Look at the scene every
         <span class="row">
-          <input type="range" id="interval" min="1" max="20" step="1" value="3">
-          <output id="interval-out">3s</output>
+          <input type="range" id="interval" min="2" max="30" step="1" value="5">
+          <output id="interval-out">5s</output>
         </span>
       </label>
       <label>
-        Motion sensitivity
-        <span class="row">
-          <input type="range" id="threshold" min="0" max="12" step="0.5" value="2.5">
-          <output id="threshold-out">2.5</output>
-        </span>
-        <small>Frames that differ from the last one you sent by less than this are
-          skipped. 0 sends every frame.</small>
+        Which frames to send
+        <select id="motion">
+          <option value="0">Every frame — most work for your computer</option>
+          <option value="1">Skip only identical frames</option>
+          <option value="2.5" selected>Skip small changes (recommended)</option>
+          <option value="6">Only send obvious movement</option>
+        </select>
+        <small>Lower options send more pictures to the model. If nothing is
+          appearing in the log, move this <em>up</em> the list, not down.</small>
       </label>
       <label>
-        Summarise every
+        Write a summary every
         <span class="row">
-          <input type="range" id="summary-every" min="2" max="20" step="1" value="6">
-          <output id="summary-every-out">6 looks</output>
+          <input type="range" id="summary-every" min="2" max="20" step="1" value="3">
+          <output id="summary-every-out">3 looks</output>
         </span>
       </label>
       <label>
-        Frame width
+        Picture size sent to the model
         <span class="row">
-          <input type="range" id="frame-width" min="256" max="896" step="64" value="512">
-          <output id="frame-width-out">512px</output>
+          <input type="range" id="frame-width" min="256" max="896" step="64" value="384">
+          <output id="frame-width-out">384px</output>
         </span>
-        <small>Smaller is faster. Most local vision models see little extra above 640px.</small>
+        <small>Smaller is much faster. Raise it only if descriptions are missing
+          detail you need.</small>
       </label>
       <details>
-        <summary>Observation prompt</summary>
+        <summary>What to ask about each frame</summary>
         <textarea id="observe-prompt" rows="7"></textarea>
       </details>
     </div>
@@ -78,17 +84,19 @@
     <div class="panel summary">
       <div class="panel-head">
         <h2>What's happening</h2>
+        <button id="summarise-now" class="ghost small" disabled>Summarise now</button>
         <span class="meta" id="summary-meta">no summary yet</span>
       </div>
       <div class="summary-body" id="summary">
-        <p class="empty">Press <strong>Start watching</strong>. The first summary appears
-          after a few looks at the scene.</p>
+        <p class="empty">Press <strong>Look once</strong> first — it takes a single
+          picture and describes it, so you can check everything works before
+          starting the continuous watch.</p>
       </div>
     </div>
 
     <div class="panel log">
       <div class="panel-head">
-        <h2>Observation log</h2>
+        <h2>Everything the camera has described</h2>
         <span class="meta" id="log-meta">0 looks · 0 skipped</span>
       </div>
       <ol id="log"></ol>

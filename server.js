@@ -16,10 +16,12 @@ const PUBLIC_DIR = path.join(HERE, "public");
 
 const PORT = Number(process.env.PORT ?? 8080);
 const OLLAMA = (process.env.OLLAMA_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
-const VISION_MODEL = process.env.VISION_MODEL ?? "qwen2.5vl:7b";
-// The summariser only ever sees text, so a plain text model is faster and
-// usually better at it. Falls back to the vision model if you have only one.
-const SUMMARY_MODEL = process.env.SUMMARY_MODEL ?? VISION_MODEL;
+// No hard-coded default model. A 7B vision model needs ~6GB of memory held
+// open, which will bring a modest laptop to its knees, so the default is
+// whichever installed model is *smallest* — see pickDefaults() below. These
+// env vars only override that choice if you set them deliberately.
+const VISION_MODEL = process.env.VISION_MODEL ?? "";
+const SUMMARY_MODEL = process.env.SUMMARY_MODEL ?? "";
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS ?? 180000);
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
@@ -123,29 +125,101 @@ async function serveStatic(req, res) {
   }
 }
 
-// GET /api/config — defaults plus whatever models Ollama actually has, so the
-// page can populate its dropdowns instead of guessing.
-async function handleConfig(res) {
-  const defaults = {
-    visionModel: VISION_MODEL,
-    summaryModel: SUMMARY_MODEL,
-    observePrompt: DEFAULT_OBSERVE_PROMPT,
+// Which installed models can actually look at a picture. Ollama reports a
+// `families` list that includes a vision encoder for multimodal models; the
+// name check is a backstop for models that report their family oddly.
+const VISION_FAMILIES = ["clip", "mllama", "qwen2vl", "qwen25vl", "gemma3", "siglip"];
+const VISION_NAMES = /vl|vision|llava|moondream|bakllava|minicpm-v|gemma3/i;
+
+function looksLikeVision(model) {
+  const families = model.details?.families ?? [];
+  if (families.some((f) => VISION_FAMILIES.includes(String(f).toLowerCase()))) return true;
+  return VISION_NAMES.test(model.name ?? "");
+}
+
+// Default to the SMALLEST capable model installed, never the best one. A big
+// model on a small machine does not run slowly — it exhausts memory and takes
+// the whole laptop down with it. Picking small by default means the thing
+// works on first try; the dropdowns let you trade up deliberately.
+function pickDefaults(models) {
+  const vision = models.filter((m) => m.vision).sort((a, b) => a.size - b.size);
+  const text = models.filter((m) => !m.vision).sort((a, b) => a.size - b.size);
+  return {
+    visionModel: VISION_MODEL || vision[0]?.name || "",
+    // The summariser never sees an image, so a small text model beats a big
+    // vision one at it. Fall back to the vision model if that is all there is.
+    summaryModel: SUMMARY_MODEL || text[0]?.name || vision[0]?.name || "",
   };
+}
+
+// Remembered from the last /api/config so observe/summarize have something
+// sane to fall back on if the page somehow posts without a model.
+let resolved = { visionModel: "", summaryModel: "" };
+
+// GET /api/config — what Ollama actually has installed, with sizes, plus the
+// lightest sensible default. The page cannot offer models you have not pulled,
+// so it also reports whether anything vision-capable is present at all.
+async function handleConfig(res) {
   try {
     const { signal, done } = withTimeout(5000);
     const tags = await fetch(`${OLLAMA}/api/tags`, { signal }).finally(done);
     if (!tags.ok) throw new Error(`status ${tags.status}`);
     const body = await tags.json();
-    const models = (body.models ?? []).map((m) => m.name).sort();
-    sendJson(res, 200, { ok: true, ollama: OLLAMA, models, ...defaults });
+
+    const models = (body.models ?? [])
+      .map((m) => ({ name: m.name, size: m.size ?? 0, vision: looksLikeVision(m) }))
+      .sort((a, b) => a.size - b.size);
+
+    resolved = pickDefaults(models);
+
+    sendJson(res, 200, {
+      ok: models.some((m) => m.vision),
+      ollama: OLLAMA,
+      models,
+      observePrompt: DEFAULT_OBSERVE_PROMPT,
+      ...resolved,
+      error: models.some((m) => m.vision)
+        ? undefined
+        : models.length === 0
+          ? "Ollama is running but has no models yet. Run this in a terminal, then reload:\n\nollama pull moondream"
+          : "None of your installed models can see images. Run this in a terminal, then reload:\n\nollama pull moondream",
+    });
   } catch (err) {
     sendJson(res, 200, {
       ok: false,
       ollama: OLLAMA,
       models: [],
-      error: `Could not reach Ollama at ${OLLAMA} (${err.message}). Is \`ollama serve\` running?`,
-      ...defaults,
+      observePrompt: DEFAULT_OBSERVE_PROMPT,
+      visionModel: "",
+      summaryModel: "",
+      error: `Could not reach Ollama at ${OLLAMA} (${err.message}). Start it with:\n\nollama serve`,
     });
+  }
+}
+
+// POST /api/warmup — load a model into memory before the first real frame.
+// Ollama loads a model on first use, which can take a minute; paying that
+// cost here means the first observation is not mistaken for a hang.
+async function handleWarmup(req, res) {
+  const body = await readJsonBody(req);
+  const model = body.model || resolved.visionModel;
+  if (!model) return sendJson(res, 400, { error: "no model to warm up" });
+
+  const started = Date.now();
+  const { signal, done } = withTimeout(REQUEST_TIMEOUT_MS);
+  try {
+    // An empty prompt tells Ollama to load the model and return.
+    await ollama("/api/generate", { model, prompt: "", keep_alive: "15m" }, signal);
+    sendJson(res, 200, { ok: true, model, ms: Date.now() - started });
+  } catch (err) {
+    const missing = /not found|no such model|pull/i.test(err.message);
+    sendJson(res, 502, {
+      error: missing
+        ? `Ollama does not have "${model}". Install it with:\n\nollama pull ${model}`
+        : err.message,
+    });
+  } finally {
+    done();
   }
 }
 
@@ -161,13 +235,14 @@ async function handleObserve(req, res) {
     const upstream = await ollama(
       "/api/generate",
       {
-        model: body.model || VISION_MODEL,
+        model: body.model || resolved.visionModel,
         prompt: body.prompt || DEFAULT_OBSERVE_PROMPT,
         images: [image],
         stream: false,
         // Captions should be short and repeatable; creativity here just
         // produces embellishment the summariser then has to believe.
-        options: { temperature: 0.1, num_predict: 120 },
+        keep_alive: "15m",
+        options: { temperature: 0.1, num_predict: 80 },
       },
       signal,
     );
@@ -212,7 +287,7 @@ async function handleSummarize(req, res) {
     const upstream = await ollama(
       "/api/chat",
       {
-        model: body.model || SUMMARY_MODEL,
+        model: body.model || resolved.summaryModel,
         messages: [
           { role: "system", content: SUMMARY_SYSTEM },
           { role: "user", content: userContent },
@@ -261,6 +336,7 @@ const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, "http://localhost");
   try {
     if (req.method === "GET" && pathname === "/api/config") return await handleConfig(res);
+    if (req.method === "POST" && pathname === "/api/warmup") return await handleWarmup(req, res);
     if (req.method === "POST" && pathname === "/api/observe") return await handleObserve(req, res);
     if (req.method === "POST" && pathname === "/api/summarize") return await handleSummarize(req, res);
     if (req.method === "GET") return await serveStatic(req, res);
@@ -275,8 +351,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`camera-watch  →  http://localhost:${PORT}`);
   console.log(`ollama        →  ${OLLAMA}`);
-  console.log(`vision model  →  ${VISION_MODEL}`);
-  console.log(`summary model →  ${SUMMARY_MODEL}`);
+  console.log(`models        →  ${VISION_MODEL || "auto (smallest installed)"}`);
   console.log("\nOpen the URL above in a browser. It must be localhost —");
   console.log("browsers only grant camera access on a secure origin.");
 });

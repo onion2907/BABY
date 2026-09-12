@@ -21,14 +21,21 @@ camera ──► <video> ──► canvas ──► motion gate ──► Node s
 ## Setup
 
 ```bash
-ollama pull qwen2.5vl:7b     # the eyes — needs ~6GB VRAM
-ollama pull llama3.1:8b      # optional: a text model for the summaries
+ollama pull moondream        # the eyes — ~1.7GB, runs on a modest laptop
 npm start
 ```
 
 Then open **http://localhost:8080**. It has to be `localhost` — browsers only
 hand over the camera on a secure origin, and plain `http://` to a LAN IP is not
-one. Grant camera access when prompted and press **Start watching**.
+one. Grant camera access when prompted, then press **Look once** before
+**Start watching**: it takes a single picture and describes it, which tells you
+in one step whether the model is a workable size for your machine.
+
+Start with `moondream` even if your machine could run more. A 7B vision model
+holds ~6GB of memory open, and on an 8GB or 16GB laptop that does not run
+slowly — it exhausts memory and drags the whole system down. Trade up only
+after `moondream` is working, and watch the seconds-per-look figure on the
+feed as you do.
 
 ### Configuration
 
@@ -38,20 +45,23 @@ All optional, all via environment variables:
 |---|---|---|
 | `PORT` | `8080` | Port for the local UI |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Where Ollama is listening |
-| `VISION_MODEL` | `qwen2.5vl:7b` | Model that looks at frames |
-| `SUMMARY_MODEL` | same as vision | Model that writes the rolling summary |
+| `VISION_MODEL` | smallest installed | Model that looks at frames |
+| `SUMMARY_MODEL` | smallest text-only installed | Model that writes the rolling summary |
 | `REQUEST_TIMEOUT_MS` | `180000` | How long to wait on a slow model |
 
-Both models can also be switched from the dropdowns in the page — it lists
-whatever `ollama list` shows.
+There is deliberately no hard-coded default model. The server asks Ollama what
+is installed and picks the **smallest** capable one, with its size shown beside
+it, so the first run works rather than impresses. The dropdowns in the page
+list only models you have already pulled — to offer a different one, pull it in
+a terminal and reload.
 
 ### Which model to pull
 
 | Model | Size | Notes |
 |---|---|---|
-| `moondream` | ~1.7GB | Fastest. Terse, sometimes wrong. Fine on a CPU-only machine. |
+| `moondream` | ~1.7GB | Start here. Fastest, terse, occasionally wrong. Works on a CPU-only machine. |
 | `llava:7b` | ~4.7GB | Older, widely available, adequate. |
-| `qwen2.5vl:7b` | ~6GB | The default. Best quality-per-GB for scene description. |
+| `qwen2.5vl:7b` | ~6GB | Best quality-per-GB, but only on a machine with memory to spare. |
 | `qwen2.5vl:32b` | ~21GB | Noticeably better at actions and object detail, if you have the VRAM. |
 
 The summariser only ever sees text, never images, so a plain text model
@@ -83,15 +93,22 @@ has more than one request in flight — if the model is still thinking when the
 next tick comes round, that tick is skipped rather than queued. Otherwise you
 end up watching a summary of what happened two minutes ago.
 
+**It stops itself.** Two consecutive looks over 45 seconds means the chosen
+model does not fit this machine, so watching halts and the page names a lighter
+model you already have. A model that is merely slower than the look interval
+just widens the interval to match. Without this, an oversized model does not
+degrade — it swaps the machine to a standstill.
+
 ## Tuning
 
 | Symptom | Try |
 |---|---|
-| Summary lags far behind reality | Smaller frame width, a smaller model, or a longer look interval |
-| Log full of near-identical lines | Raise motion sensitivity |
-| Nothing is ever logged | Lower motion sensitivity; check the motion badge on the feed |
-| Descriptions are vague or invented | Bigger vision model; tighten the observation prompt |
-| Summary ignores the NOW/SINCE format | Use a dedicated text model for the summary — small VLMs follow format poorly |
+| Whole machine slows or freezes | The model is too big. Switch to `moondream` and reduce picture size. |
+| Summary lags far behind reality | Smaller picture size, a smaller model, or a longer look interval |
+| Log full of near-identical lines | Move "Which frames to send" *down* the list |
+| Nothing is ever logged | Move "Which frames to send" *up* the list; watch the `change` badge on the feed |
+| Descriptions are vague or invented | Bigger vision model, if the machine can take it; tighten the prompt |
+| Summary ignores the NOW/SINCE format | Use a dedicated text model for the summary — small vision models follow format poorly |
 
 The observation prompt is editable in the page (under **Observation prompt**)
 and takes effect on the next frame, so you can aim it at whatever you actually

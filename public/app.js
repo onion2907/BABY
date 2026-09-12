@@ -148,6 +148,7 @@ async function loadConfig() {
 
   hideBanner();
   describeChosenModel();
+  noteSummaryModel();
   setStatus("idle", "Ready — try “Look once” first");
   return true;
 }
@@ -174,6 +175,20 @@ function describeChosenModel() {
   } else {
     hideBanner();
   }
+}
+
+// The summariser only ever reads text. A vision model pressed into that job
+// tends to parrot the input back — bare timestamps, no prose — so nudge
+// towards a small text-only model if none is installed.
+function noteSummaryModel() {
+  const chosen = installed.find((m) => m.name === ui.summaryModel.value);
+  const hasTextModel = installed.some((m) => !m.vision);
+  if (!chosen?.vision || hasTextModel) return;
+  showBanner(
+    `The summary is being written by "${chosen.name}", which is built to look at pictures, not to write prose — ` +
+    `expect the summary to read poorly. For a much better one, install a small text model by running this in a ` +
+    `terminal, then reload this page:\n\nollama pull llama3.2:3b`,
+  );
 }
 
 async function ensureCamera() {
@@ -305,7 +320,14 @@ async function observe() {
       return;
     }
 
-    const entry = { time, text: body.text, ms: body.ms };
+    if (!String(body.text ?? "").trim()) {
+      appendLog({ time, text: "the model returned an empty answer", error: true });
+      setStatus("error", "The model answered with nothing");
+      showBanner('The model ran but produced no words. Open "What to ask about each frame" and make the question shorter and simpler.', "bad");
+      return;
+    }
+
+    const entry = { time, text: body.text, ms: body.ms, retried: body.retried };
     state.observations.push(entry);
     state.pending.push(entry);
     state.looks++;
@@ -481,7 +503,7 @@ function renderSummary(text) {
 
 // ---------- log ----------
 
-function appendLog({ time, text, ms, error }) {
+function appendLog({ time, text, ms, error, retried }) {
   const li = document.createElement("li");
   if (error) li.classList.add("error");
   li.classList.add("fresh");
@@ -493,7 +515,7 @@ function appendLog({ time, text, ms, error }) {
   body.textContent = text;
   const latency = document.createElement("span");
   latency.className = "ms";
-  latency.textContent = ms ? `${(ms / 1000).toFixed(1)}s` : "";
+  latency.textContent = ms ? `${retried ? "retried · " : ""}${(ms / 1000).toFixed(1)}s` : "";
 
   li.append(stamp, body, latency);
   ui.log.prepend(li);
@@ -556,6 +578,7 @@ bindRange(ui.interval, ui.intervalOut, (v) => `${v}s`);
 bindRange(ui.summaryEvery, ui.summaryEveryOut, (v) => `${v} looks`);
 bindRange(ui.frameWidth, ui.frameWidthOut, (v) => `${v}px`);
 
+ui.summaryModel.addEventListener("change", () => { hideBanner(); noteSummaryModel(); });
 ui.visionModel.addEventListener("change", () => {
   state.warmedModel = null;
   state.slowStreak = 0;

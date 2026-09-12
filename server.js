@@ -35,12 +35,14 @@ const CONTENT_TYPES = {
   ".ico": "image/x-icon",
 };
 
+// Keep this SHORT. Small vision models (moondream, llava) are templated as
+// "Question: ... Answer:" and return an empty string when handed a paragraph
+// of instructions and prohibitions. Brevity is not a style choice here.
 const DEFAULT_OBSERVE_PROMPT =
-  "Describe what is happening in this camera frame in one or two short sentences. " +
-  "Report only what is visibly present: people, their posture and actions, objects " +
-  "being held or moved, and any change of activity. Do not speculate about intent, " +
-  "identity, mood, or anything outside the frame. If the frame shows an empty or " +
-  "static scene, say exactly that and nothing more.";
+  "Describe what is happening in this image in one or two short sentences.";
+
+// Used only to retry when the model returns nothing at all.
+const FALLBACK_OBSERVE_PROMPT = "Describe this image.";
 
 const SUMMARY_SYSTEM =
   "You keep a running account of what a single fixed camera has been showing. " +
@@ -224,33 +226,58 @@ async function handleWarmup(req, res) {
 }
 
 // POST /api/observe — one frame in, one caption out.
+
+async function askOnce(model, prompt, image, signal) {
+  const upstream = await ollama(
+    "/api/generate",
+    {
+      model,
+      prompt,
+      images: [image],
+      stream: false,
+      keep_alive: "15m",
+      // Captions should be short and repeatable; creativity here just produces
+      // embellishment the summariser then has to believe.
+      options: { temperature: 0.1, num_predict: 150 },
+    },
+    signal,
+  );
+  const result = await upstream.json();
+  return (result.response ?? "").trim();
+}
+
 async function handleObserve(req, res) {
   const body = await readJsonBody(req);
   const image = String(body.image ?? "").replace(/^data:image\/\w+;base64,/, "");
   if (!image) return sendJson(res, 400, { error: "no image in request" });
 
+  const model = body.model || resolved.visionModel;
+  const prompt = body.prompt || DEFAULT_OBSERVE_PROMPT;
   const started = Date.now();
   const { signal, done } = withTimeout(REQUEST_TIMEOUT_MS);
+
   try {
-    const upstream = await ollama(
-      "/api/generate",
-      {
-        model: body.model || resolved.visionModel,
-        prompt: body.prompt || DEFAULT_OBSERVE_PROMPT,
-        images: [image],
-        stream: false,
-        // Captions should be short and repeatable; creativity here just
-        // produces embellishment the summariser then has to believe.
-        keep_alive: "15m",
-        options: { temperature: 0.1, num_predict: 80 },
-      },
-      signal,
-    );
-    const result = await upstream.json();
-    sendJson(res, 200, {
-      text: (result.response ?? "").trim(),
-      ms: Date.now() - started,
-    });
+    let text = await askOnce(model, prompt, image, signal);
+    let retried = false;
+
+    // An empty answer is the signature failure of a small vision model given
+    // too long a prompt. Retry once with the shortest possible question before
+    // blaming anything else.
+    if (!text) {
+      retried = true;
+      text = await askOnce(model, FALLBACK_OBSERVE_PROMPT, image, signal);
+    }
+
+    if (!text) {
+      return sendJson(res, 502, {
+        error:
+          `"${model}" answered twice with nothing at all. Small models do this when the ` +
+          `question is too long or too complicated. Open "What to ask about each frame" ` +
+          `and replace it with something short, such as:\n\nDescribe what is happening in this image.`,
+      });
+    }
+
+    sendJson(res, 200, { text, ms: Date.now() - started, retried });
   } catch (err) {
     const reason = err.name === "AbortError"
       ? `the model did not answer within ${REQUEST_TIMEOUT_MS / 1000}s`

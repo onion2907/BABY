@@ -22,6 +22,7 @@ camera ──► <video> ──► canvas ──► motion gate ──► Node s
 
 ```bash
 ollama pull moondream        # the eyes — ~1.7GB, runs on a modest laptop
+ollama pull llama3.2:3b      # the writer — ~2GB, for readable summaries
 npm start
 ```
 
@@ -65,7 +66,17 @@ a terminal and reload.
 | `qwen2.5vl:32b` | ~21GB | Noticeably better at actions and object detail, if you have the VRAM. |
 
 The summariser only ever sees text, never images, so a plain text model
-(`llama3.1:8b`) is both faster and better at it than a vision model.
+(`llama3.2:3b`) is both faster and far better at it than a vision model. Ask a
+vision model to summarise and it tends to parrot its input back — bare
+timestamps with no prose. The page warns you if that is the setup you are on.
+
+**Keep the question short.** The observation prompt defaults to one sentence
+for a reason: small vision models are templated as `Question: … Answer:` and
+return an *empty string* when handed a paragraph of rules and prohibitions.
+They do not error — they answer with nothing. The server retries once with the
+shortest possible question and reports a blank answer plainly if that fails
+too, but the fix is a shorter question, not a retry. A 7B model tolerates a
+long prompt; a 1.8B one does not.
 
 ## How it works
 
@@ -103,6 +114,8 @@ degrade — it swaps the machine to a standstill.
 
 | Symptom | Try |
 |---|---|
+| Descriptions are blank, timings look normal | The question is too long for the model. Shorten it to one plain sentence. |
+| Summary is just a row of timestamps | A vision model is writing it. Install `llama3.2:3b` and pick it as the summary model. |
 | Whole machine slows or freezes | The model is too big. Switch to `moondream` and reduce picture size. |
 | Summary lags far behind reality | Smaller picture size, a smaller model, or a longer look interval |
 | Log full of near-identical lines | Move "Which frames to send" *down* the list |

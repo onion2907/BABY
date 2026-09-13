@@ -10,6 +10,7 @@ import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import * as discover from "../lib/discover.js";
 import { DEFAULT_CREDENTIALS } from "../lib/discover.js";
+import * as onvif from "../lib/onvif-discover.js";
 import * as settings from "../lib/config.js";
 
 const args = process.argv.slice(2);
@@ -92,25 +93,46 @@ async function main() {
       say("\nThis computer does not seem to be on a network. Connect to your wifi and try again.");
       process.exit(1);
     }
+    say(`This computer is on: ${subnets.map((n) => n + ".x").join(", ")}`);
+
+    // ONVIF discovery first: it is fast and finds a camera whatever port it
+    // uses, now that ONVIF is switched on.
+    say("\nAsking any ONVIF cameras on the network to identify themselves…");
+    const onvifHosts = await onvif.discover({ timeoutMs: 5000 });
+    if (onvifHosts.length) {
+      say(`ONVIF answered from: ${onvifHosts.join(", ")}`);
+      hosts.push(...onvifHosts);
+    } else {
+      say("No ONVIF camera answered the call.");
+    }
+
+    // Then the port sweep, to catch anything ONVIF discovery missed.
     for (const subnet of subnets) {
-      say(`\nScanning ${subnet}.1 to ${subnet}.254 for cameras — this takes about a minute.`);
-      const found = await discover.scan(subnet, 554, (done, total) => {
+      say(`\nScanning ${subnet}.1 to ${subnet}.254 — this takes about a minute.`);
+      const found = await discover.scan(subnet, undefined, (done, total) => {
         stdout.write(`\r  checked ${done} of ${total}…   `);
       });
       stdout.write("\r" + " ".repeat(40) + "\r");
-      hosts.push(...found);
+      for (const host of found) if (!hosts.includes(host)) hosts.push(host);
     }
+
     if (hosts.length === 0) {
-      say("\nNo cameras answered on this network.");
-      say("\nThings worth checking:");
-      say("  • Is the camera switched on, and on the same wifi as this computer?");
-      say("  • Many CP Plus cameras need the video stream switched on once, in their app,");
-      say("    under Settings → Advanced, or by creating a separate camera user account.");
-      say("  • If the camera is wired into a recorder box, find that box's address instead");
-      say("    and run:  npm run find-camera -- --ip <that address> --channels 1,2,3,4");
+      say("\nNothing that looks like a camera answered on this network.");
+      say("\nThe most common reason, by far: your camera and this computer are on");
+      say("different networks. Home routers often keep phones/cameras on a separate");
+      say('"guest" or "IoT" wifi, or split 2.4GHz and 5GHz into separate networks.');
+      say("Then nothing on one can see the other, and no software can bridge it.");
+      say("\nTwo things to try:");
+      say("  1. In the Ezykam app, open the camera's device information and read its");
+      say("     IP address (four numbers like 192.168.1.42). Then run:");
+      say("        npm run find-camera -- --ip 192.168.1.42");
+      say("     If that address does not start with the same first three numbers as");
+      say(`     this computer (${subnets[0] ?? "?"}.x), they are on different networks —`);
+      say("     connect this computer to the same wifi the camera uses and try again.");
+      say("  2. Make sure this laptop is on your normal home wifi, not a guest one.");
       process.exit(1);
     }
-    say(`Found ${hosts.length} device${hosts.length === 1 ? "" : "s"} that could be a camera: ${hosts.join(", ")}`);
+    say(`\nDevices to check: ${hosts.join(", ")}`);
   }
 
   for (const host of hosts) {

@@ -41,10 +41,12 @@ finder work out its address for you:
 npm run find-camera
 ```
 
-It scans the network, tries every stream and snapshot address it knows, and
-saves the one that returns a real picture. It asks for the camera's username
-and password — press Enter at the password if you don't know it, and it will
-try the common factory logins on its own.
+It asks any ONVIF camera on the network to identify itself, then sweeps the
+network for anything else on a camera port, then tries every stream and
+snapshot address it knows against each until one returns a real picture, and
+saves it. It asks for the camera's username and password — press Enter at the
+password if you don't know it, and it will try the common factory logins on
+its own.
 
 For a camera wired into a recorder box, give it the box's address and the
 channels to try:
@@ -181,7 +183,7 @@ the night diary to be vaguer than the day one, and test it before relying on it.
 
 | Symptom | Try |
 |---|---|
-| The finder found nothing | The camera's local feed is probably switched off (common on cloud cameras like Ezykam), or the camera only talks to its own app. See "Cloud cameras" below. |
+| The finder found nothing | Usually the camera and computer are on different networks (guest/IoT wifi, or split 2.4/5GHz). Read the camera's IP from its app and pass `--ip`; if it doesn't share this computer's first three numbers, they can't see each other. Otherwise the local feed is off — see "Cloud cameras". |
 | The finder says the password was refused, defaults didn't work | Reset the camera to a password you choose. See "Cloud cameras" below. |
 | Whole machine slows or freezes | The model is too big. Switch to `moondream`. |
 | Descriptions are blank, timings look normal | The question is too long. Shorten it to one plain sentence. |

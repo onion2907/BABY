@@ -11,6 +11,7 @@ import { stdin, stdout } from "node:process";
 import * as discover from "../lib/discover.js";
 import { DEFAULT_CREDENTIALS } from "../lib/discover.js";
 import * as onvif from "../lib/onvif-discover.js";
+import * as onvifMedia from "../lib/onvif-media.js";
 import * as settings from "../lib/config.js";
 
 const args = process.argv.slice(2);
@@ -83,6 +84,7 @@ async function main() {
   const channels = (flag("channels", "1") ?? "1").split(",").map((c) => Number(c.trim())).filter(Boolean);
 
   let hosts = [];
+  const onvifXaddr = new Map(); // host -> ONVIF service URL, when known
   const givenIp = flag("ip");
   if (givenIp) {
     hosts = [givenIp];
@@ -98,10 +100,11 @@ async function main() {
     // ONVIF discovery first: it is fast and finds a camera whatever port it
     // uses, now that ONVIF is switched on.
     say("\nAsking any ONVIF cameras on the network to identify themselves…");
-    const onvifHosts = await onvif.discover({ timeoutMs: 5000 });
-    if (onvifHosts.length) {
-      say(`ONVIF answered from: ${onvifHosts.join(", ")}`);
-      hosts.push(...onvifHosts);
+    const onvifServices = await onvif.discover({ timeoutMs: 5000 });
+    for (const svc of onvifServices) onvifXaddr.set(svc.host, svc.xaddr);
+    if (onvifServices.length) {
+      say(`ONVIF answered from: ${onvifServices.map((s) => s.host).join(", ")}`);
+      hosts.push(...onvifServices.map((s) => s.host));
     } else {
       say("No ONVIF camera answered the call.");
     }
@@ -136,6 +139,32 @@ async function main() {
   }
 
   for (const host of hosts) {
+    // If ONVIF told us where this camera is, ask it directly for its stream
+    // address rather than guessing — this is the reliable path.
+    if (onvifXaddr.has(host)) {
+      say(`\nAsking ${host} over ONVIF for its exact video address…`);
+      try {
+        const streamUrl = await onvifMedia.getStreamUri(onvifXaddr.get(host), user, password);
+        say(`It answered: ${streamUrl.replace(/\/\/[^@]*@/, "//")}`);
+        const check = await discover.verifyRtsp(streamUrl, user, password);
+        if (check.ok) {
+          return await offerToSave({ kind: "rtsp", url: streamUrl, channel: 1, bytes: check.bytes }, user, password);
+        }
+        if (check.reason === "ffmpeg-missing") {
+          say("\nThe address was found, but ffmpeg — needed to read a video stream —");
+          say("is not installed. Install it, then this will work:\n");
+          say("  brew install ffmpeg\n");
+          // Save it anyway so they don't have to run discovery again.
+          settings.save({ source: "rtsp", rtspUrl: streamUrl, cameraUser: user, cameraPassword: password });
+          say(`Saved the address to ${settings.CONFIG_PATH}. After installing ffmpeg, run:  npm start`);
+          return;
+        }
+        say(`The camera gave an address, but no picture came back (${check.reason}). Trying other addresses…`);
+      } catch (err) {
+        say(`ONVIF could not give a stream address (${err.message}). Trying other addresses…`);
+      }
+    }
+
     say(`\nTrying addresses on ${host}…`);
     let attempts = 0;
     const result = await discover.probeHost(host, {

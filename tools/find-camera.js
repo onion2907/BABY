@@ -9,6 +9,7 @@
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import * as discover from "../lib/discover.js";
+import { DEFAULT_CREDENTIALS } from "../lib/discover.js";
 import * as settings from "../lib/config.js";
 
 const args = process.argv.slice(2);
@@ -38,14 +39,45 @@ async function ask(question, { hidden = false } = {}) {
   return answer.trim();
 }
 
+async function offerToSave(result, user, password) {
+  say("Found it.");
+  say();
+  say(`  Camera address : ${result.url.replace(/\/\/[^@]*@/, "//")}`);
+  say(`  Type           : ${result.kind === "rtsp" ? "video stream" : "still picture"}`);
+  say(`  Channel        : ${result.channel}`);
+  say(`  Picture size   : ${Math.round(result.bytes / 1024)} KB`);
+  say();
+
+  const save = has("save") ||
+    (await ask("Save this as the camera to watch? (y/n) ")).toLowerCase().startsWith("y");
+  if (save) {
+    settings.save({
+      source: result.kind,
+      [result.kind === "rtsp" ? "rtspUrl" : "snapshotUrl"]: result.url,
+      cameraUser: user,
+      cameraPassword: password,
+    });
+    say(`\nSaved to ${settings.CONFIG_PATH}`);
+    say("\nNow run:  npm start");
+    say("then open http://localhost:8080 and press Start watching.");
+  } else {
+    say("\nNothing saved. The address that worked was:");
+    say(`\n  ${result.url}`);
+  }
+}
+
 async function main() {
   say("Looking for your camera.");
   say();
 
   let user = flag("user");
   let password = flag("password");
-  if (user === null) user = await ask("Camera username (often 'admin'): ");
-  if (password === null) password = await ask("Camera password: ", { hidden: true });
+  if (user === null) user = (await ask("Camera username (press Enter for 'admin'): ")) || "admin";
+  let knowsPassword = true;
+  if (password === null) {
+    password = await ask("Camera password (press Enter if you don't know it): ", { hidden: true });
+    knowsPassword = password.length > 0;
+  }
 
   const channels = (flag("channels", "1") ?? "1").split(",").map((c) => Number(c.trim())).filter(Boolean);
 
@@ -91,9 +123,19 @@ async function main() {
     stdout.write("\r" + " ".repeat(40) + "\r");
 
     if (result.kind === "auth-failed") {
-      say(`${host} is a camera, but it refused that username and password.`);
-      say("Check them in your camera's app. Some CP Plus cameras need a separate");
-      say("camera account created before anything else can connect.");
+      say(`${host} is a camera, and it answers — but not with the password given.`);
+      say("Trying the common factory passwords for this kind of camera…");
+      const cred = await discover.tryDefaultCredentials(result.authKind, result.url);
+      if (cred) {
+        say(`\nOne worked: username "${cred.user}", password "${cred.password || "(blank)"}".`);
+        return await offerToSave(
+          { kind: result.authKind, url: result.url, channel: 1, bytes: cred.bytes },
+          cred.user, cred.password,
+        );
+      }
+      say("\nNone of the common passwords worked either.");
+      say("This is the usual point at which a cloud camera like Ezykam has to be");
+      say("reset to a password you choose — see the steps this printed at the end.");
       continue;
     }
 
@@ -106,32 +148,7 @@ async function main() {
       continue;
     }
 
-    say("Found it.");
-    say();
-    say(`  Camera address : ${host}`);
-    say(`  Type           : ${result.kind === "rtsp" ? "video stream" : "still picture"}`);
-    say(`  Channel        : ${result.channel}`);
-    say(`  Picture size   : ${Math.round(result.bytes / 1024)} KB`);
-    say();
-
-    const save = has("save") ||
-      (await ask("Save this as the camera to watch? (y/n) ")).toLowerCase().startsWith("y");
-
-    if (save) {
-      settings.save({
-        source: result.kind,
-        [result.kind === "rtsp" ? "rtspUrl" : "snapshotUrl"]: result.url,
-        cameraUser: user,
-        cameraPassword: password,
-      });
-      say(`\nSaved to ${settings.CONFIG_PATH}`);
-      say("\nNow run:  npm start");
-      say("then open http://localhost:8080 and press Start watching.");
-    } else {
-      say("\nNothing saved. The address that worked was:");
-      say(`\n  ${result.url}`);
-    }
-    return;
+    return await offerToSave(result, user, password);
   }
 
   say("\nNone of the devices found gave a picture.");

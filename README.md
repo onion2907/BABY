@@ -42,8 +42,12 @@ npm run find-camera
 ```
 
 It scans the network, tries every stream and snapshot address it knows, and
-saves the one that returns a real picture. For a camera wired into a recorder
-box, give it the box's address and the channels to try:
+saves the one that returns a real picture. It asks for the camera's username
+and password — press Enter at the password if you don't know it, and it will
+try the common factory logins on its own.
+
+For a camera wired into a recorder box, give it the box's address and the
+channels to try:
 
 ```bash
 npm run find-camera -- --ip 192.168.1.9 --channels 1,2,3,4
@@ -78,6 +82,32 @@ Try snapshot first; fall back to stream.
 Credentials live in `config.json` on your machine. They are never sent back to
 the page, never written to the diary, and are stripped out of any address shown
 on screen.
+
+## Cloud cameras (Ezykam, and similar)
+
+Some cameras — CP Plus's **Ezykam** line among them — are built to talk only to
+their own phone app and the maker's servers. The local video feed this program
+needs is often switched **off** by default, and on some models is not offered at
+all. If the finder can't reach such a camera, that is the camera's design, not a
+fault here.
+
+Two things to try, in order:
+
+1. **Turn the local feed on.** In the Ezykam app, open the camera's settings and
+   look for anything named **RTSP**, **ONVIF**, **local**, or **local network**.
+   If it's there, switch it on. If there's no such setting, this model likely
+   can't be read locally — stop here.
+
+2. **Set a password you know, by resetting the camera.** Most of these cameras
+   have a small **RESET** button (sometimes inside a pinhole, sometimes under a
+   twist-off base). With the camera powered on, hold it ~10 seconds until it
+   chimes or the light changes, then set it up again in the app — this time
+   noting the password you choose. That password is what the finder needs.
+   Resetting a camera you own is safe; it only forgets its old settings.
+
+If neither works, the camera can't be the test — and that's the honest answer.
+A ~₹3,000 Tapo or a plain USB webcam will both work where a locked cloud camera
+won't.
 
 ## What gets saved
 
@@ -151,8 +181,8 @@ the night diary to be vaguer than the day one, and test it before relying on it.
 
 | Symptom | Try |
 |---|---|
-| The finder found nothing | Many CP Plus and Dahua cameras need their stream switched on once, in the app, or a separate camera account created before anything else may connect. |
-| The finder says the password was refused | Check it in the camera's own app. A camera account is often separate from the app login. |
+| The finder found nothing | The camera's local feed is probably switched off (common on cloud cameras like Ezykam), or the camera only talks to its own app. See "Cloud cameras" below. |
+| The finder says the password was refused, defaults didn't work | Reset the camera to a password you choose. See "Cloud cameras" below. |
 | Whole machine slows or freezes | The model is too big. Switch to `moondream`. |
 | Descriptions are blank, timings look normal | The question is too long. Shorten it to one plain sentence. |
 | Summary is just a row of timestamps | A vision model is writing it. Install `llama3.2:3b` and pick it as the summary model. |

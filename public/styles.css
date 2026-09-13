@@ -335,3 +335,128 @@ details summary {
   main { grid-template-columns: 1fr; }
   .readout { min-height: 0; grid-template-rows: auto 340px; }
 }
+
+/* ---------- nudges ---------- */
+
+.nudges {
+  margin: 14px 20px 0;
+  display: grid;
+  gap: 8px;
+}
+.nudge {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 12px 15px;
+  border: 1px solid rgb(240 115 106 / 0.45);
+  background: rgb(240 115 106 / 0.1);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.nudge time {
+  font: 500 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--bad);
+}
+.nudges button { justify-self: start; margin-left: 0; }
+
+/* ---------- still image from a home camera ---------- */
+
+#still {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #000;
+}
+#still[hidden], #video[hidden] { display: none; }
+
+/* ---------- settings ---------- */
+
+.controls-wrap {
+  border-top: 1px solid var(--line);
+}
+.controls-wrap > summary {
+  cursor: pointer;
+  padding: 12px 15px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  list-style-position: inside;
+}
+.controls-wrap > summary:hover { color: var(--ink); }
+.controls-wrap .controls { border-top: 1px solid var(--line); }
+
+.camera-fields {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.18);
+}
+.camera-fields[hidden] { display: none; }
+
+input[type="text"], input[type="password"] {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  width: 100%;
+}
+
+button.wide { width: 100%; padding: 10px; margin-top: 2px; }
+
+.day-picker {
+  width: auto;
+  margin-left: auto;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+.day-picker + .meta { margin-left: 10px; }
+
+/* ---------- log entry kinds ---------- */
+
+.log li.nudge-entry .text,
+.log li.nudge .text { color: var(--bad); }
+.log li.started .text,
+.log li.stopped .text {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+footer {
+  padding: 18px 20px 28px;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+
+/* ---------- phone ---------- */
+
+@media (max-width: 720px) {
+  header {
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    padding: 12px 14px;
+  }
+  header h1 { font-size: 14px; }
+  .status { order: 3; width: 100%; margin-left: 0; }
+  button.primary { margin-left: auto; }
+
+  main { padding: 12px 14px 24px; gap: 12px; }
+  .banner, .nudges { margin: 12px 14px 0; }
+
+  /* The summary is the reason to open this on a phone — put it first. */
+  .readout { order: -1; grid-template-rows: auto auto; }
+  .summary-body { font-size: 15px; padding: 15px 16px; }
+  .log ol { max-height: 60vh; }
+  .video-wrap { aspect-ratio: 16 / 10; }
+}

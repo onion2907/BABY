@@ -1,22 +1,30 @@
 # camera-watch
 
-Point your laptop camera at something, and a vision model running on your own
-machine describes what it sees in a pane beside the live feed.
+A written diary of what a camera sees, kept by a vision model running on your
+own machine. It describes the room every so often, folds those descriptions
+into a rolling summary, and saves the lot to disk so a day can be read back.
 
-Everything stays local. Frames go from the browser to a small Node server on
-`localhost`, from there to Ollama on `localhost`, and the text comes back the
-same way. No API key, no account, nothing leaves the machine.
+**This is a diary, not a safety alarm.** A small model glancing at a still
+picture every half-minute cannot be relied on to catch anything dangerous —
+those things happen in seconds, often look like nothing in a photograph, and it
+has no sound at all. "Everything looks fine" from this program is not evidence
+that everything is fine. Keep a real monitor.
+
+Everything stays local. Pictures go from the camera to a small server on your
+machine, from there to Ollama on the same machine, and the text comes back the
+same way. No account, no API key, nothing leaves the house.
 
 ```
-camera ──► <video> ──► canvas ──► motion gate ──► Node server ──► Ollama
-                │                                                    │
-          live preview                summary pane ◄── SSE stream ◄───┘
+camera ──► server ──► vision model ──► description ──► text model ──► summary
+             │                                │                          │
+       latest picture                    saved to disk            shown in the page
 ```
 
 ## Requirements
 
 - Node 18 or newer (uses built-in `fetch` — no npm dependencies at all)
-- [Ollama](https://ollama.com) with a vision model pulled
+- [Ollama](https://ollama.com) with a vision model and a small text model
+- `ffmpeg`, but only for cameras that provide a video stream (`brew install ffmpeg`)
 
 ## Setup
 
@@ -26,121 +34,132 @@ ollama pull llama3.2:3b      # the writer — ~2GB, for readable summaries
 npm start
 ```
 
-Then open **http://localhost:8080**. It has to be `localhost` — browsers only
-hand over the camera on a secure origin, and plain `http://` to a LAN IP is not
-one. Grant camera access when prompted, then press **Look once** before
-**Start watching**: it takes a single picture and describes it, which tells you
-in one step whether the model is a workable size for your machine.
+Open **http://localhost:8080**, expand **Camera and model settings**, and choose
+where pictures should come from.
 
 Start with `moondream` even if your machine could run more. A 7B vision model
-holds ~6GB of memory open, and on an 8GB or 16GB laptop that does not run
-slowly — it exhausts memory and drags the whole system down. Trade up only
-after `moondream` is working, and watch the seconds-per-look figure on the
-feed as you do.
+holds ~6GB of memory open, and on an 8GB or 16GB machine that does not run
+slowly — it exhausts memory and drags the whole system down.
 
-### Configuration
+## The three camera sources
 
-All optional, all via environment variables:
-
-| Variable | Default | What it does |
+| Source | Needs | Watching runs |
 |---|---|---|
-| `PORT` | `8080` | Port for the local UI |
-| `OLLAMA_URL` | `http://127.0.0.1:11434` | Where Ollama is listening |
-| `VISION_MODEL` | smallest installed | Model that looks at frames |
-| `SUMMARY_MODEL` | smallest text-only installed | Model that writes the rolling summary |
-| `REQUEST_TIMEOUT_MS` | `180000` | How long to wait on a slow model |
+| **This laptop's own camera** | nothing | only while the page is open |
+| **Still-picture address** | the camera's snapshot URL | in the background, no browser needed |
+| **Video stream** | `ffmpeg`, the camera's RTSP URL | in the background, no browser needed |
 
-There is deliberately no hard-coded default model. The server asks Ollama what
-is installed and picks the **smallest** capable one, with its size shown beside
-it, so the first run works rather than impresses. The dropdowns in the page
-list only models you have already pulled — to offer a different one, pull it in
-a terminal and reload.
+The laptop webcam has to be captured by the browser, because that is the only
+thing with access to it — so closing the tab stops the watching. Both home
+camera options are fetched by the server instead, which is what lets the diary
+keep running unattended.
 
-### Which model to pull
+**Snapshot vs stream.** A snapshot address needs no extra software and is the
+easier of the two, but many cameras protect it with digest authentication,
+which this cannot do — you get a clear message saying so. The video stream
+handles any authentication the camera uses, at the cost of installing `ffmpeg`.
+Try snapshot first; fall back to stream.
 
-| Model | Size | Notes |
-|---|---|---|
-| `moondream` | ~1.7GB | Start here. Fastest, terse, occasionally wrong. Works on a CPU-only machine. |
-| `llava:7b` | ~4.7GB | Older, widely available, adequate. |
-| `qwen2.5vl:7b` | ~6GB | Best quality-per-GB, but only on a machine with memory to spare. |
-| `qwen2.5vl:32b` | ~21GB | Noticeably better at actions and object detail, if you have the VRAM. |
+Credentials live in `config.json` on your machine. They are never sent back to
+the page, never written to the diary, and are stripped out of any address shown
+on screen.
 
-The summariser only ever sees text, never images, so a plain text model
-(`llama3.2:3b`) is both faster and far better at it than a vision model. Ask a
-vision model to summarise and it tends to parrot its input back — bare
-timestamps with no prose. The page warns you if that is the setup you are on.
+## What gets saved
 
-**Keep the question short.** The observation prompt defaults to one sentence
-for a reason: small vision models are templated as `Question: … Answer:` and
-return an *empty string* when handed a paragraph of rules and prohibitions.
-They do not error — they answer with nothing. The server retries once with the
-shortest possible question and reports a blank answer plainly if that fails
-too, but the fix is a shorter question, not a retry. A 7B model tolerates a
-long prompt; a 1.8B one does not.
+One file per day under `data/`, as plain text lines — readable in any text
+editor, with or without this program:
+
+```
+data/2026-09-13.jsonl
+```
+
+Each line is one event: a look (with its description and a short activity
+label), a summary, a nudge, or the watching starting and stopping. Nothing is
+ever overwritten.
+
+## Nudges
+
+Only one is on by default, because it is the only one that is reliable:
+
+- **The camera stopped answering.** Raised after a few failures in a row,
+  recorded in the diary, and raised once — not once per attempt.
+
+There is a second, off by default: **nobody visible for N minutes**. Leave it
+off until you have watched a full day of real descriptions from your own
+camera, including at night. Tuning it blind produces a program that nudges
+constantly and gets ignored, which is worse than no nudge at all.
+
+## Reading it from a phone
+
+The server listens on your whole home network, so any phone on the same wifi
+can open `http://<your computer's address>:8080`. On a Mac, find the address in
+System Settings → Wi-Fi → Details → IP Address.
+
+**There is no login.** That is fine on a home network you control. Never
+forward this port to the internet — it would put a live camera and your child's
+day on the public web. To read it from outside the house, use something like
+Tailscale, which connects your phone privately to your own machine rather than
+opening anything up.
 
 ## How it works
 
-**Two tiers.** Per-frame captions on their own are unreadable noise — "a person
-sitting at a desk" a thousand times over. So each frame gets one short
-observation, and every few observations a second call folds them into a rolling
-account: what is happening now, plus a timestamped list of what changed. That
-account is fed back in as context on the next update, so it accumulates across
-the whole session instead of resetting.
+**Two models, two jobs.** The vision model only describes a single picture. A
+small text model then turns that description into something a rule can act on,
+and writes the rolling summary. Two cheap specialists beat one model doing both
+jobs badly — ask a vision model to summarise and it parrots its input back.
 
-**The motion gate.** Sending every frame to a local model is pointless — it
-can't keep up, and a still room produces a thousand identical captions. Each
-candidate frame is downscaled to 64×48 grayscale and compared against the last
-frame that was *actually sent*; if the mean per-pixel difference is under the
-threshold, the frame is skipped. Comparing against the last sent frame rather
-than the last captured one means a slow drift still eventually trips it. A
-frame is forced through every 90 seconds regardless, so a long quiet stretch
-still leaves a trace.
+**The summary accumulates.** Each update is given the previous summary plus the
+descriptions recorded since, so the account grows across the day instead of
+resetting. It is stored with the day's diary.
 
-Raise **motion sensitivity** if a noisy sensor keeps triggering on an empty
-room; drop it to 0 to send every frame.
+**Regular sampling, not motion triggers.** A diary wants an even record of the
+day, so pictures are taken on a fixed cadence. Earlier versions gated on motion,
+which suits a live monitor and produces a diary full of holes.
 
-**One at a time.** A local vision model takes seconds per frame. The loop never
-has more than one request in flight — if the model is still thinking when the
-next tick comes round, that tick is skipped rather than queued. Otherwise you
-end up watching a summary of what happened two minutes ago.
+**Keep the question short.** The observation prompt defaults to one sentence
+because small vision models are templated as `Question: … Answer:` and return an
+*empty string* when handed a paragraph of rules. They do not error — they answer
+with nothing. The server retries once with the shortest possible question and
+reports a blank plainly if that fails too.
 
-**It stops itself.** Two consecutive looks over 45 seconds means the chosen
-model does not fit this machine, so watching halts and the page names a lighter
-model you already have. A model that is merely slower than the look interval
-just widens the interval to match. Without this, an oversized model does not
-degrade — it swaps the machine to a standstill.
+**One picture at a time.** Nothing is queued. If a look is still running when
+the next is due, the next is skipped, so an overloaded machine falls behind
+gracefully rather than accumulating work it cannot finish.
+
+## Night vision
+
+Cameras switch to infrared in the dark: grey, flat, no colour. These models are
+noticeably worse at reading those pictures, and small ones especially so. Expect
+the night diary to be vaguer than the day one, and test it before relying on it.
 
 ## Tuning
 
 | Symptom | Try |
 |---|---|
-| Descriptions are blank, timings look normal | The question is too long for the model. Shorten it to one plain sentence. |
+| Whole machine slows or freezes | The model is too big. Switch to `moondream`. |
+| Descriptions are blank, timings look normal | The question is too long. Shorten it to one plain sentence. |
 | Summary is just a row of timestamps | A vision model is writing it. Install `llama3.2:3b` and pick it as the summary model. |
-| Whole machine slows or freezes | The model is too big. Switch to `moondream` and reduce picture size. |
-| Summary lags far behind reality | Smaller picture size, a smaller model, or a longer look interval |
-| Log full of near-identical lines | Move "Which frames to send" *down* the list |
-| Nothing is ever logged | Move "Which frames to send" *up* the list; watch the `change` badge on the feed |
-| Descriptions are vague or invented | Bigger vision model, if the machine can take it; tighten the prompt |
-| Summary ignores the NOW/SINCE format | Use a dedicated text model for the summary — small vision models follow format poorly |
-
-The observation prompt is editable in the page (under **Observation prompt**)
-and takes effect on the next frame, so you can aim it at whatever you actually
-care about — "note only whether anyone enters or leaves", say.
+| "the camera rejected the username and password" | The camera wants digest auth. Switch the source to the video stream. |
+| "ffmpeg is not installed" | `brew install ffmpeg` |
+| Diary too sparse / too repetitive | Change how often it looks, in the settings |
 
 ## Layout
 
 ```
-server.js           local HTTP server; serves the page, proxies to Ollama
-public/index.html   the page
-public/app.js       camera capture, motion gate, watch loop, rendering
-public/styles.css   styling
+server.js           the local server and its endpoints
+lib/config.js       settings file, and keeping credentials out of the page
+lib/capture.js      getting one picture out of a webcam, snapshot URL or RTSP stream
+lib/store.js        the diary on disk, one file per day
+lib/ollama.js       every call to the local model
+lib/watcher.js      the background loop that survives the browser closing
+public/             the page
 ```
 
 ## Limits worth knowing
 
-- It describes, it does not track. There is no identity across frames — "a
-  person" in two observations may or may not be the same person.
-- Timestamps come from the browser clock at capture time, not from the model.
-- The log keeps the last 300 entries in the DOM and nothing on disk. Close the
-  tab and the session is gone.
-- The server binds to `127.0.0.1` only, so nothing on your network can reach it.
+- It describes, it does not track. There is no identity across pictures — "a
+  person" in two entries may or may not be the same person.
+- Timestamps come from the computer's clock at capture time, not the model.
+- No sound at all.
+- Descriptions are frequently wrong in detail. Treat the diary as a rough record
+  of the shape of a day, not as a transcript.

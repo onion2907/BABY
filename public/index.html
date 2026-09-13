@@ -11,98 +11,126 @@
 <header>
   <h1>camera<span>-watch</span></h1>
   <div class="status" id="status" data-state="idle">
-    <span class="dot"></span><span id="status-text">Checking Ollama…</span>
+    <span class="dot"></span><span id="status-text">Starting up…</span>
   </div>
-  <button id="look-once" class="ghost" disabled>Look once</button>
+  <button id="look-once" class="ghost" hidden>Look once</button>
   <button id="toggle" class="primary" disabled>Start watching</button>
 </header>
 
 <div class="banner" id="banner" hidden><span id="banner-text"></span></div>
+<div class="nudges" id="nudges" hidden></div>
 
 <main>
   <section class="feed panel">
     <div class="video-wrap">
-      <video id="video" autoplay playsinline muted></video>
+      <video id="video" autoplay playsinline muted hidden></video>
+      <img id="still" alt="The most recent picture from the camera" hidden>
       <div class="overlay" id="overlay">Camera off</div>
       <div class="badges">
-        <span class="badge" id="badge-motion">—</span>
-        <span class="badge" id="badge-latency">—</span>
+        <span class="badge" id="badge-a">—</span>
+        <span class="badge" id="badge-b">—</span>
       </div>
     </div>
 
-    <div class="controls">
-      <label>
-        Vision model <small id="vision-note"></small>
-        <select id="vision-model"></select>
-      </label>
-      <label>
-        Summary model
-        <select id="summary-model"></select>
-      </label>
-      <label>
-        Look at the scene every
-        <span class="row">
-          <input type="range" id="interval" min="2" max="30" step="1" value="5">
-          <output id="interval-out">5s</output>
-        </span>
-      </label>
-      <label>
-        Which frames to send
-        <select id="motion">
-          <option value="0">Every frame — most work for your computer</option>
-          <option value="1">Skip only identical frames</option>
-          <option value="2.5" selected>Skip small changes (recommended)</option>
-          <option value="6">Only send obvious movement</option>
-        </select>
-        <small>Lower options send more pictures to the model. If nothing is
-          appearing in the log, move this <em>up</em> the list, not down.</small>
-      </label>
-      <label>
-        Write a summary every
-        <span class="row">
-          <input type="range" id="summary-every" min="2" max="20" step="1" value="3">
-          <output id="summary-every-out">3 looks</output>
-        </span>
-      </label>
-      <label>
-        Picture size sent to the model
-        <span class="row">
-          <input type="range" id="frame-width" min="256" max="896" step="64" value="384">
-          <output id="frame-width-out">384px</output>
-        </span>
-        <small>Smaller is much faster. Raise it only if descriptions are missing
-          detail you need.</small>
-      </label>
-      <details>
-        <summary>What to ask about each frame</summary>
-        <textarea id="observe-prompt" rows="7"></textarea>
-      </details>
-    </div>
+    <details class="controls-wrap" id="settings-wrap">
+      <summary>Camera and model settings</summary>
+      <div class="controls">
+        <label>
+          Where the pictures come from
+          <select id="source">
+            <option value="webcam">This laptop's own camera (needs this page open)</option>
+            <option value="snapshot">A home camera — still-picture address</option>
+            <option value="rtsp">A home camera — video stream (needs ffmpeg)</option>
+          </select>
+        </label>
+
+        <div class="camera-fields" id="camera-fields" hidden>
+          <label id="field-snapshot">
+            Still-picture address
+            <input type="text" id="snapshotUrl" placeholder="http://192.168.1.50/snapshot.jpg" autocomplete="off">
+          </label>
+          <label id="field-rtsp">
+            Video stream address
+            <input type="text" id="rtspUrl" placeholder="rtsp://192.168.1.50:554/stream1" autocomplete="off">
+          </label>
+          <label>
+            Camera username
+            <input type="text" id="cameraUser" autocomplete="off">
+          </label>
+          <label>
+            Camera password
+            <input type="password" id="cameraPassword" autocomplete="new-password" placeholder="unchanged">
+            <small>Saved on this computer only. It is never sent back to this page.</small>
+          </label>
+        </div>
+
+        <label>
+          Vision model <small id="vision-note"></small>
+          <select id="visionModel"></select>
+        </label>
+        <label>
+          Summary model
+          <select id="summaryModel"></select>
+        </label>
+        <label>
+          Look at the room every
+          <span class="row">
+            <input type="range" id="intervalSeconds" min="5" max="300" step="5" value="30">
+            <output id="intervalSeconds-out">30s</output>
+          </span>
+        </label>
+        <label>
+          Write a summary every
+          <span class="row">
+            <input type="range" id="summaryEveryLooks" min="2" max="40" step="1" value="10">
+            <output id="summaryEveryLooks-out">10 looks</output>
+          </span>
+        </label>
+        <label>
+          Nudge me if nobody is visible for
+          <span class="row">
+            <input type="range" id="nudgeOnNobodySeenMinutes" min="0" max="120" step="5" value="0">
+            <output id="nudgeOnNobodySeenMinutes-out">off</output>
+          </span>
+          <small>Leave off until you have seen a day of real descriptions — otherwise
+            it will nudge you constantly for no reason.</small>
+        </label>
+        <label>
+          What to ask about each picture
+          <textarea id="observePrompt" rows="3"></textarea>
+          <small>Keep it to one short sentence. Small models answer with nothing
+            when the question is long.</small>
+        </label>
+        <button id="save-settings" class="primary wide">Save settings</button>
+      </div>
+    </details>
   </section>
 
   <section class="readout">
     <div class="panel summary">
       <div class="panel-head">
         <h2>What's happening</h2>
-        <button id="summarise-now" class="ghost small" disabled>Summarise now</button>
         <span class="meta" id="summary-meta">no summary yet</span>
       </div>
       <div class="summary-body" id="summary">
-        <p class="empty">Press <strong>Look once</strong> first — it takes a single
-          picture and describes it, so you can check everything works before
-          starting the continuous watch.</p>
+        <p class="empty">Nothing recorded yet today.</p>
       </div>
     </div>
 
     <div class="panel log">
       <div class="panel-head">
-        <h2>Everything the camera has described</h2>
-        <span class="meta" id="log-meta">0 looks · 0 skipped</span>
+        <h2>The diary</h2>
+        <select id="day-picker" class="day-picker"></select>
+        <span class="meta" id="log-meta">0 entries</span>
       </div>
       <ol id="log"></ol>
     </div>
   </section>
 </main>
+
+<footer>
+  A written record, not a safety alarm. Keep a real baby monitor.
+</footer>
 
 <script src="app.js" type="module"></script>
 </body>

@@ -34,8 +34,23 @@ ollama pull llama3.2:3b      # the writer — ~2GB, for readable summaries
 npm start
 ```
 
-Open **http://localhost:8080**, expand **Camera and model settings**, and choose
-where pictures should come from.
+Then point it at a camera. If you have one on your network already, let the
+finder work out its address for you:
+
+```bash
+npm run find-camera
+```
+
+It scans the network, tries every stream and snapshot address it knows, and
+saves the one that returns a real picture. For a camera wired into a recorder
+box, give it the box's address and the channels to try:
+
+```bash
+npm run find-camera -- --ip 192.168.1.9 --channels 1,2,3,4
+```
+
+Or open **http://localhost:8080**, expand **Camera and model settings**, and
+fill the address in by hand.
 
 Start with `moondream` even if your machine could run more. A 7B vision model
 holds ~6GB of memory open, and on an 8GB or 16GB machine that does not run
@@ -136,6 +151,8 @@ the night diary to be vaguer than the day one, and test it before relying on it.
 
 | Symptom | Try |
 |---|---|
+| The finder found nothing | Many CP Plus and Dahua cameras need their stream switched on once, in the app, or a separate camera account created before anything else may connect. |
+| The finder says the password was refused | Check it in the camera's own app. A camera account is often separate from the app login. |
 | Whole machine slows or freezes | The model is too big. Switch to `moondream`. |
 | Descriptions are blank, timings look normal | The question is too long. Shorten it to one plain sentence. |
 | Summary is just a row of timestamps | A vision model is writing it. Install `llama3.2:3b` and pick it as the summary model. |
@@ -148,6 +165,9 @@ the night diary to be vaguer than the day one, and test it before relying on it.
 ```
 server.js           the local server and its endpoints
 lib/config.js       settings file, and keeping credentials out of the page
+lib/camera-urls.js  the stream and snapshot addresses worth trying
+lib/discover.js     scanning the network and identifying a camera
+tools/find-camera.js  the finder you run from a terminal
 lib/capture.js      getting one picture out of a webcam, snapshot URL or RTSP stream
 lib/store.js        the diary on disk, one file per day
 lib/ollama.js       every call to the local model

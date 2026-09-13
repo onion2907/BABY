@@ -13,6 +13,7 @@ import * as ollama from "./lib/ollama.js";
 import * as store from "./lib/store.js";
 import * as watcher from "./lib/watcher.js";
 import * as settings from "./lib/config.js";
+import { resolveSettings, listModels } from "./lib/models.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
@@ -74,47 +75,6 @@ async function serveStatic(req, res) {
     send(res, 200, data, { "Content-Type": CONTENT_TYPES[path.extname(target)] ?? "application/octet-stream" });
   } catch {
     send(res, 404, "Not found");
-  }
-}
-
-// ---------- models ----------
-
-const VISION_FAMILIES = ["clip", "mllama", "qwen2vl", "qwen25vl", "gemma3", "siglip"];
-const VISION_NAMES = /vl|vision|llava|moondream|bakllava|minicpm-v|gemma3/i;
-
-const looksLikeVision = (model) =>
-  (model.details?.families ?? []).some((f) => VISION_FAMILIES.includes(String(f).toLowerCase())) ||
-  VISION_NAMES.test(model.name ?? "");
-
-// Default to the SMALLEST capable model installed, never the best one. A big
-// model on a small machine does not run slowly — it exhausts memory and takes
-// the whole machine down with it.
-function chooseModels(models, saved) {
-  const vision = models.filter((m) => m.vision).sort((a, b) => a.size - b.size);
-  const text = models.filter((m) => !m.vision).sort((a, b) => a.size - b.size);
-  const installed = (name) => models.some((m) => m.name === name);
-  return {
-    visionModel: installed(saved.visionModel) ? saved.visionModel : vision[0]?.name ?? "",
-    summaryModel: installed(saved.summaryModel) ? saved.summaryModel : text[0]?.name ?? vision[0]?.name ?? "",
-  };
-}
-
-async function listModels() {
-  return (await ollama.tags())
-    .map((m) => ({ name: m.name, size: m.size ?? 0, vision: looksLikeVision(m) }))
-    .sort((a, b) => a.size - b.size);
-}
-
-// Keep config.json's chosen models honest: if it names something no longer
-// installed, fall back rather than failing every look with a 404.
-async function resolveSettings() {
-  const saved = settings.load();
-  try {
-    const models = await listModels();
-    const chosen = chooseModels(models, saved);
-    return { config: { ...saved, ...chosen }, models, ollamaUp: true };
-  } catch {
-    return { config: saved, models: [], ollamaUp: false };
   }
 }
 

@@ -7,6 +7,7 @@
 //
 // Written to be run by someone who does not know their camera's model number.
 import readline from "node:readline/promises";
+import { Writable } from "node:stream";
 import { stdin, stdout } from "node:process";
 import * as discover from "../lib/discover.js";
 import { DEFAULT_CREDENTIALS } from "../lib/discover.js";
@@ -23,21 +24,27 @@ const has = (name) => args.includes(`--${name}`);
 
 const say = (line = "") => console.log(line);
 
-async function ask(question, { hidden = false } = {}) {
-  const rl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
-  if (!hidden) {
-    const answer = await rl.question(question);
-    rl.close();
-    return answer.trim();
+// Hiding a typed password by redrawing the prompt on every keystroke fights
+// readline's own cursor handling and can end up echoing the prompt twice and
+// losing the input. The reliable way is to give readline an output stream that
+// simply swallows what it would echo.
+class MutableOutput extends Writable {
+  constructor() { super(); this.muted = false; }
+  _write(chunk, encoding, callback) {
+    if (!this.muted) stdout.write(chunk, encoding);
+    callback();
   }
-  // Keep the password off the screen — this gets typed in front of people.
-  const promise = rl.question(question);
-  const onData = () => { rl.output.write("\x1b[2K\x1b[200D" + question); };
-  rl.input.on("data", onData);
+}
+
+async function ask(question, { hidden = false } = {}) {
+  const output = new MutableOutput();
+  const rl = readline.createInterface({ input: stdin, output, terminal: true });
+  const promise = rl.question(question);   // prompt is written while unmuted
+  output.muted = hidden;                   // then hide only what is typed back
   const answer = await promise;
-  rl.input.off("data", onData);
+  output.muted = false;
   rl.close();
-  say();
+  if (hidden) say();
   return answer.trim();
 }
 
@@ -79,6 +86,9 @@ async function main() {
   if (password === null) {
     password = await ask("Camera password (press Enter if you don't know it): ", { hidden: true });
     knowsPassword = password.length > 0;
+    say(knowsPassword
+      ? `Password received (${password.length} characters).`
+      : "No password given — the common factory ones will be tried instead.");
   }
 
   const channels = (flag("channels", "1") ?? "1").split(",").map((c) => Number(c.trim())).filter(Boolean);
@@ -143,26 +153,46 @@ async function main() {
     // address rather than guessing — this is the reliable path.
     if (onvifXaddr.has(host)) {
       say(`\nAsking ${host} over ONVIF for its exact video address…`);
-      try {
-        const streamUrl = await onvifMedia.getStreamUri(onvifXaddr.get(host), user, password);
-        say(`It answered: ${streamUrl.replace(/\/\/[^@]*@/, "//")}`);
-        const check = await discover.verifyRtsp(streamUrl, user, password);
-        if (check.ok) {
-          return await offerToSave({ kind: "rtsp", url: streamUrl, channel: 1, bytes: check.bytes }, user, password);
-        }
-        if (check.reason === "ffmpeg-missing") {
-          say("\nThe address was found, but ffmpeg — needed to read a video stream —");
-          say("is not installed. Install it, then this will work:\n");
-          say("  brew install ffmpeg\n");
-          // Save it anyway so they don't have to run discovery again.
-          settings.save({ source: "rtsp", rtspUrl: streamUrl, cameraUser: user, cameraPassword: password });
-          say(`Saved the address to ${settings.CONFIG_PATH}. After installing ffmpeg, run:  npm start`);
-          return;
-        }
-        say(`The camera gave an address, but no picture came back (${check.reason}). Trying other addresses…`);
-      } catch (err) {
-        say(`ONVIF could not give a stream address (${err.message}). Trying other addresses…`);
+
+      // Try what the owner gave us first, then the factory logins — the camera
+      // tells us plainly when it is the password that is wrong.
+      const candidates = [{ user, password }];
+      for (const cred of DEFAULT_CREDENTIALS) {
+        if (cred.user !== user || cred.password !== password) candidates.push(cred);
       }
+
+      let lastReason = null;
+      for (const cred of candidates) {
+        try {
+          const streamUrl = await onvifMedia.getStreamUri(
+            onvifXaddr.get(host), cred.user, cred.password, { onNote: (note) => say(`  ${note}`) },
+          );
+          say(`  It answered: ${streamUrl.replace(/\/\/[^@]*@/, "//")}`);
+          if (cred.user !== user || cred.password !== password) {
+            say(`  (using username "${cred.user}", password "${cred.password || "(blank)"}")`);
+          }
+          const check = await discover.verifyRtsp(streamUrl, cred.user, cred.password);
+          if (check.ok) {
+            return await offerToSave(
+              { kind: "rtsp", url: streamUrl, channel: 1, bytes: check.bytes }, cred.user, cred.password);
+          }
+          if (check.reason === "ffmpeg-missing") {
+            say("\n  The address was found, but ffmpeg — needed to read a video stream —");
+            say("  is not installed. Install it, then this will work:\n");
+            say("    brew install ffmpeg\n");
+            settings.save({ source: "rtsp", rtspUrl: streamUrl, cameraUser: cred.user, cameraPassword: cred.password });
+            say(`  Saved the address to ${settings.CONFIG_PATH}. After installing ffmpeg, run:  npm start`);
+            return;
+          }
+          say(`  The camera gave that address but no picture came back (${check.reason}).`);
+          lastReason = check.reason;
+        } catch (err) {
+          lastReason = err.message;
+          // Only keep trying other logins while it is the password being refused.
+          if (!/authoriz|password|username/i.test(err.message)) break;
+        }
+      }
+      if (lastReason) say(`  ONVIF could not give a working stream address (${lastReason}).`);
     }
 
     say(`\nTrying addresses on ${host}…`);
